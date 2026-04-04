@@ -1,0 +1,107 @@
+# Splunk SIEM Alert Configurations
+# ==================================
+# Reference configurations for automated security alerts.
+# These are documented as savedsearches.conf entries for reproducibility.
+# In practice, create these through the Splunk GUI:
+# Settings → Searches, reports, and alerts → New Alert
+
+
+# ============================================================
+# ALERT 1: Brute-Force Detected
+# ============================================================
+# Triggers when any single IP exceeds 50 failed logins in 15 minutes.
+#
+# Search:
+#   index=windows_security EventCode=4625
+#   | stats count by src_ip
+#   | where count > 50
+#
+# Schedule:       Every 15 minutes
+# Time Range:     Last 15 minutes
+# Trigger:        When number of results > 0
+# Severity:       High
+# Action:         Log event to index=alerts
+
+
+# ============================================================
+# ALERT 2: Credential Compromise (Brute-Force then Success)
+# ============================================================
+# Triggers when an IP fails authentication repeatedly then succeeds.
+#
+# Search:
+#   index=windows_security (EventCode=4625 OR EventCode=4624)
+#   | stats count(eval(EventCode=4625)) AS failures,
+#          count(eval(EventCode=4624)) AS successes
+#          by src_ip
+#   | where failures > 20 AND successes > 0
+#
+# Schedule:       Every 15 minutes
+# Time Range:     Last 15 minutes
+# Trigger:        When number of results > 0
+# Severity:       Critical
+# Action:         Log event, email SOC team
+
+
+# ============================================================
+# ALERT 3: New Admin Account Created
+# ============================================================
+# Triggers immediately when a new user account is created.
+#
+# Search:
+#   index=windows_security EventCode=4720
+#
+# Schedule:       Real-time
+# Trigger:        When number of results > 0
+# Severity:       High
+# Action:         Log event, email SOC team
+
+
+# ============================================================
+# ALERT 4: SQL Injection Attempt
+# ============================================================
+# Triggers when web requests contain SQL injection patterns.
+#
+# Search:
+#   index=web_logs
+#   | where like(uri_path, "%SELECT%") OR like(uri_path, "%UNION%")
+#          OR like(uri_path, "%DROP%") OR like(uri_path, "%1=1%")
+#   | stats count by clientip
+#   | where count > 5
+#
+# Schedule:       Every 5 minutes
+# Time Range:     Last 5 minutes
+# Trigger:        When number of results > 0
+# Severity:       Medium
+# Action:         Log event
+
+
+# ============================================================
+# ALERT 5: Large Outbound Data Transfer
+# ============================================================
+# Triggers when a single host transfers more than 100 MB externally.
+#
+# Search:
+#   index=firewall action=allowed
+#   | stats sum(bytes_out) AS total_bytes by src_ip, dest_ip
+#   | where total_bytes > 104857600
+#   | eval MB=round(total_bytes/1048576,2)
+#
+# Schedule:       Every 30 minutes
+# Time Range:     Last 30 minutes
+# Trigger:        When number of results > 0
+# Severity:       High
+# Action:         Log event, email SOC team
+
+
+# ============================================================
+# ALERT 6: Critical IDS Alert
+# ============================================================
+# Triggers on any Suricata alert with severity 1 (critical).
+#
+# Search:
+#   index=ids_alerts alert.severity=1
+#
+# Schedule:       Real-time
+# Trigger:        When number of results > 0
+# Severity:       Critical
+# Action:         Log event, email SOC team, create ticket

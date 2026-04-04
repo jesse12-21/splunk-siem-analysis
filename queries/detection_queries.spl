@@ -1,0 +1,185 @@
+# Splunk SIEM Detection Queries
+# ================================
+# A collection of SPL queries for security monitoring and threat detection.
+# These queries are designed for use with the BOTS v1 dataset but can be
+# adapted for any environment with similar log sources.
+
+
+# ============================================================
+# AUTHENTICATION MONITORING
+# ============================================================
+
+# --- Brute-Force Detection (Threshold) ---
+# Identifies source IPs with more than 20 failed logins in a 1-hour window.
+index=windows_security EventCode=4625
+| bin _time span=1h
+| stats count AS failures by src_ip, _time
+| where failures > 20
+| sort -failures
+
+# --- Brute-Force Followed by Successful Login ---
+# High-confidence credential compromise: many failures then success from same IP.
+index=windows_security (EventCode=4625 OR EventCode=4624)
+| stats count(eval(EventCode=4625)) AS failures, count(eval(EventCode=4624)) AS successes by src_ip
+| where failures > 20 AND successes > 0
+| eval risk="HIGH - Likely credential compromise"
+| table src_ip, failures, successes, risk
+
+# --- Failed Logins Over Time ---
+# Time-series view of authentication failures to identify attack windows.
+index=windows_security EventCode=4625
+| timechart span=1h count AS "Failed Logins"
+
+# --- Account Lockouts ---
+# Detect account lockout events (often triggered by brute-force).
+index=windows_security EventCode=4740
+| table _time, Account_Name, src_ip
+| sort -_time
+
+
+# ============================================================
+# PRIVILEGE ESCALATION
+# ============================================================
+
+# --- New Account Creation ---
+# Detects when a new user account is created.
+index=windows_security EventCode=4720
+| table _time, Account_Name, TargetUserName
+| sort -_time
+
+# --- Group Membership Changes ---
+# Monitors additions to privileged groups (Domain Admins, Administrators, etc.).
+index=windows_security (EventCode=4728 OR EventCode=4732 OR EventCode=4756)
+| table _time, EventCode, Account_Name, TargetUserName, Group_Name
+| sort -_time
+
+# --- Sudo Usage on Linux ---
+# Monitors sudo command execution for privilege escalation attempts.
+index=linux_auth process=sudo
+| table _time, user, src_ip, command
+| sort -_time
+
+
+# ============================================================
+# WEB APPLICATION ATTACKS
+# ============================================================
+
+# --- SQL Injection Detection ---
+# Searches for common SQL injection patterns in web request URIs.
+index=web_logs
+| where like(uri_path, "%SELECT%") OR like(uri_path, "%UNION%") OR like(uri_path, "%DROP%") OR like(uri_path, "%1=1%") OR like(uri_path, "%OR%1%")
+| stats count by clientip, uri_path, status
+| sort -count
+
+# --- Directory Traversal ---
+# Detects path traversal attempts in web requests.
+index=web_logs
+| where like(uri_path, "%../%") OR like(uri_path, "%/etc/passwd%") OR like(uri_path, "%/proc/%")
+| table _time, clientip, method, uri_path, status
+| sort -_time
+
+# --- Web Scanner Detection ---
+# Identifies automated scanners by high volume of 404 errors from a single IP.
+index=web_logs status=404
+| stats count by clientip
+| where count > 100
+| sort -count
+
+# --- HTTP Error Spike ---
+# Time-series of HTTP errors to identify attack windows.
+index=web_logs (status=404 OR status=500 OR status=403)
+| timechart span=1h count by status
+
+
+# ============================================================
+# NETWORK / EXFILTRATION
+# ============================================================
+
+# --- Large Outbound Transfers ---
+# Detects unusually large data transfers to external IPs.
+index=firewall action=allowed dest_port!=80 dest_port!=443 dest_port!=53
+| stats count, sum(bytes_out) AS total_bytes by src_ip, dest_ip, dest_port
+| where total_bytes > 10000000
+| eval MB_transferred=round(total_bytes/1048576,2)
+| table src_ip, dest_ip, dest_port, count, MB_transferred
+| sort -MB_transferred
+
+# --- Connections to Unusual Ports ---
+# Identifies outbound connections on non-standard ports (potential C2).
+index=firewall action=allowed dest_port!=80 dest_port!=443 dest_port!=53 dest_port!=22
+| stats count by dest_ip, dest_port
+| where count > 10
+| sort -count
+
+# --- Firewall Deny Spike ---
+# Time-series of firewall blocks to identify scanning or attack activity.
+index=firewall action=blocked
+| timechart span=1h count
+
+
+# ============================================================
+# IDS ALERT ANALYSIS
+# ============================================================
+
+# --- High-Severity IDS Alerts ---
+# Surfaces critical and high-severity Suricata alerts.
+index=ids_alerts alert.severity<=2
+| stats count by alert.signature, src_ip, dest_ip
+| sort -count
+| head 20
+
+# --- IDS Alerts Over Time ---
+# Time-series of IDS alerts to spot attack campaigns.
+index=ids_alerts
+| timechart span=1h count by alert.severity
+
+
+# ============================================================
+# CROSS-SOURCE CORRELATION
+# ============================================================
+
+# --- Full Activity for a Specific IP ---
+# Correlate all events from a single source IP across every log source.
+# Replace <ATTACKER_IP> with the actual IP address.
+(index=web_logs clientip="<ATTACKER_IP>") OR
+(index=windows_security src_ip="<ATTACKER_IP>") OR
+(index=firewall src_ip="<ATTACKER_IP>") OR
+(index=ids_alerts src_ip="<ATTACKER_IP>")
+| eval source_type=case(
+    index="web_logs", "Web",
+    index="windows_security", "Windows",
+    index="firewall", "Firewall",
+    index="ids_alerts", "IDS"
+)
+| table _time, source_type, index, sourcetype, _raw
+| sort _time
+
+# --- Attack Summary by Source IP ---
+# Summarizes activity volume per log source for a given attacker.
+(index=web_logs clientip="<ATTACKER_IP>") OR
+(index=windows_security src_ip="<ATTACKER_IP>") OR
+(index=firewall src_ip="<ATTACKER_IP>") OR
+(index=ids_alerts src_ip="<ATTACKER_IP>")
+| stats count by index
+| rename index AS "Log Source", count AS "Event Count"
+
+
+# ============================================================
+# DASHBOARD QUERIES
+# ============================================================
+
+# --- Top 10 Attacking IPs ---
+index=windows_security EventCode=4625
+| stats count by src_ip
+| sort -count
+| head 10
+
+# --- Geolocation of Attack Sources ---
+index=windows_security EventCode=4625
+| iplocation src_ip
+| geostats count by Country
+
+# --- Event Count by Index ---
+| eventcount summarize=false index=*
+| table index, count
+| sort -count

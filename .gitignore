@@ -1,0 +1,21 @@
+# Splunk data (too large for git)
+*.csv
+*.gz
+*.tar
+*.tgz
+botsv1/
+
+# Splunk configuration with credentials
+local/
+passwd
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

@@ -1,107 +1,71 @@
 # Splunk SIEM Alert Configurations
 # ==================================
-# Reference configurations for automated security alerts.
-# These are documented as savedsearches.conf entries for reproducibility.
-# In practice, create these through the Splunk GUI:
-# Settings → Searches, reports, and alerts → New Alert
-
-
-# ============================================================
-# ALERT 1: Brute-Force Detected
-# ============================================================
-# Triggers when any single IP exceeds 50 failed logins in 15 minutes.
+# SUPERSEDED. This file previously described six alerts as prose comments.
+# It stated they were "documented as savedsearches.conf entries", but no
+# stanzas were present — the content could be read, not deployed.
 #
-# Search:
-#   index=windows_security EventCode=4625
-#   | stats count by src_ip
-#   | where count > 50
+# Alerts are now GENERATED from the detection YAML in detections/ by
+# contentctl. Running `contentctl build` produces a complete, installable
+# Splunk app at dist/, including a real savedsearches.conf:
 #
-# Schedule:       Every 15 minutes
-# Time Range:     Last 15 minutes
-# Trigger:        When number of results > 0
-# Severity:       High
-# Action:         Log event to index=alerts
-
-
+#   [BOTSv1 Excessive Failed Logons From Single Source - Rule]
+#   action.correlationsearch.enabled = 1
+#   action.risk = 1
+#   action.risk.param._risk = [{"risk_object_field": "src",
+#                               "risk_object_type": "system",
+#                               "risk_score": 30}]
+#   cron_schedule = 0 * * * *
+#   dispatch.earliest_time = -70m@m
+#   dispatch.latest_time = -10m@m
+#   search = | tstats `security_content_summariesonly` count as failure_count ...
+#
+# Two things changed beyond the file format.
+#
+# First, these are correlation searches writing to the RISK index, not
+# alerts writing to the notable index. Nothing reaches the analyst queue
+# until accumulated entity risk crosses a threshold. See docs/rba-guide.md.
+#
+# Second, the searches themselves were rewritten to use tstats against CIM
+# data models rather than raw index searches. The originals below are kept
+# for comparison.
+#
+#
 # ============================================================
-# ALERT 2: Credential Compromise (Brute-Force then Success)
+# MIGRATION MAP — old alert to current detection
 # ============================================================
-# Triggers when an IP fails authentication repeatedly then succeeds.
 #
-# Search:
-#   index=windows_security (EventCode=4625 OR EventCode=4624)
-#   | stats count(eval(EventCode=4625)) AS failures,
-#          count(eval(EventCode=4624)) AS successes
-#          by src_ip
-#   | where failures > 20 AND successes > 0
+#  Old alert                          Current detection                                Risk
+#  ---------------------------------  -----------------------------------------------  ----
+#  1. Brute-Force Detected            botsv1_excessive_failed_logons_from_single_...    30
+#  2. Credential Compromise           botsv1_successful_logon_after_failed_logon_...    70
+#  3. New Admin Account Created       botsv1_privileged_group_membership_change         40
+#  4. SQL Injection Attempt           botsv1_web_sql_injection_attempt                  60
+#  5. Large Outbound Data Transfer    (not migrated — see note below)                    —
+#  6. Critical IDS Alert              botsv1_high_severity_suricata_ids_alert           45
 #
-# Schedule:       Every 15 minutes
-# Time Range:     Last 15 minutes
-# Trigger:        When number of results > 0
-# Severity:       Critical
-# Action:         Log event, email SOC team
-
-
+# Alert 5 was not migrated. A 100 MB outbound transfer threshold produces
+# almost nothing but false positives on any network carrying backups, cloud
+# sync, or software distribution, and tuning it requires a baseline this
+# project does not have. Shipping it as a risk contribution would have
+# inflated entity scores with noise. The hunting query is retained in
+# detection_queries.spl, where an analyst runs it deliberately rather than
+# it firing on a schedule.
+#
+# Alert 3 changed scope during migration. "New Admin Account Created"
+# watched EventCode 4720 (account creation). The current detection watches
+# group membership modification via the Change data model, which is the
+# event that actually confers privilege — creating an account grants
+# nothing until it is added to a group.
+#
+#
 # ============================================================
-# ALERT 3: New Admin Account Created
+# DEPLOYING
 # ============================================================
-# Triggers immediately when a new user account is created.
 #
-# Search:
-#   index=windows_security EventCode=4720
+#   pip install contentctl
+#   contentctl validate          # schema, references, RBA structure
+#   contentctl build             # -> dist/botsv1_soc_detections-latest.tar.gz
 #
-# Schedule:       Real-time
-# Trigger:        When number of results > 0
-# Severity:       High
-# Action:         Log event, email SOC team
-
-
-# ============================================================
-# ALERT 4: SQL Injection Attempt
-# ============================================================
-# Triggers when web requests contain SQL injection patterns.
-#
-# Search:
-#   index=web_logs
-#   | where like(uri_path, "%SELECT%") OR like(uri_path, "%UNION%")
-#          OR like(uri_path, "%DROP%") OR like(uri_path, "%1=1%")
-#   | stats count by clientip
-#   | where count > 5
-#
-# Schedule:       Every 5 minutes
-# Time Range:     Last 5 minutes
-# Trigger:        When number of results > 0
-# Severity:       Medium
-# Action:         Log event
-
-
-# ============================================================
-# ALERT 5: Large Outbound Data Transfer
-# ============================================================
-# Triggers when a single host transfers more than 100 MB externally.
-#
-# Search:
-#   index=firewall action=allowed
-#   | stats sum(bytes_out) AS total_bytes by src_ip, dest_ip
-#   | where total_bytes > 104857600
-#   | eval MB=round(total_bytes/1048576,2)
-#
-# Schedule:       Every 30 minutes
-# Time Range:     Last 30 minutes
-# Trigger:        When number of results > 0
-# Severity:       High
-# Action:         Log event, email SOC team
-
-
-# ============================================================
-# ALERT 6: Critical IDS Alert
-# ============================================================
-# Triggers on any Suricata alert with severity 1 (critical).
-#
-# Search:
-#   index=ids_alerts alert.severity=1
-#
-# Schedule:       Real-time
-# Trigger:        When number of results > 0
-# Severity:       Critical
-# Action:         Log event, email SOC team, create ticket
+# Install the resulting app on a search head running Splunk Enterprise
+# Security. Both commands run in CI on every push — see
+# .github/workflows/validate-content.yml.

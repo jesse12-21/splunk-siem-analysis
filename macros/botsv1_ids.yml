@@ -1,0 +1,3 @@
+definition: index=ids_alerts
+description: Suricata EVE JSON alert source. Populated by the companion suricata-ids-rules project.
+name: botsv1_ids

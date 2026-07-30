@@ -1,0 +1,19 @@
+name: BOTSv1 Web Attacks
+id: 9a1d7f34-2b58-4c96-8e03-7d4f1a6c0b25
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+description: Detections covering web application attack activity in the Boss of the
+  SOC v1 dataset, including injection attempts and automated content discovery.
+narrative: The BOTSv1 scenario opens with reconnaissance and exploitation against a
+  public-facing web application. Grouping these detections into one story means a
+  single actor moving from scanning through injection accumulates risk against their
+  source address rather than producing unconnected alerts.
+references:
+- https://attack.mitre.org/techniques/T1190/
+- https://github.com/splunk/botsv1
+tags:
+  category: [Adversary Tactics]
+  product: [Splunk Enterprise, Splunk Enterprise Security, Splunk Cloud]
+  usecase: Security Monitoring

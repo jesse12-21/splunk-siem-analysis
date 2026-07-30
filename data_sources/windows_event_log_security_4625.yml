@@ -1,0 +1,20 @@
+name: Windows Event Log Security 4625
+id: 1e0a4b78-9c3d-4f52-a86b-0d7c5e2f91a4
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+description: Windows Security event log, failed logon events (EventCode 4625). In
+  the BOTSv1 dataset these arrive via the wineventlog sourcetype and are normalised
+  to the Authentication data model by the Splunk Add-on for Microsoft Windows.
+source: WinEventLog:Security
+sourcetype: WinEventLog
+supported_TA:
+- name: Splunk Add-on for Microsoft Windows
+  url: https://splunkbase.splunk.com/app/742
+  version: 9.0.0
+fields:
+- _time
+- EventCode
+- src
+- user
+- action

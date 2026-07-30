@@ -1,0 +1,51 @@
+name: BOTSv1 Web Scanning Via Not Found Responses
+id: e1b47c93-2a80-4d65-9c37-5f8e0b2d146a
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+type: Anomaly
+description: Identifies automated content discovery by counting HTTP 404 responses
+  per source address. Scanning tools request large wordlists of paths; the resulting
+  404 volume is distinctive even when the tool spoofs its user agent, which is why
+  this is more durable than user-agent matching.
+data_source:
+- Web Server Access Logs
+search: '| tstats `security_content_summariesonly` count as not_found_count, dc(Web.url)
+  as unique_urls, min(_time) as firstTime, max(_time) as lastTime from datamodel=Web.Web
+  where Web.status=404 by Web.src, Web.dest | `drop_dm_object_name(Web)` | where not_found_count
+  > 100 AND unique_urls > 50 | `security_content_ctime(firstTime)` | `security_content_ctime(lastTime)`
+  | `botsv1_web_scanning_via_not_found_responses_filter`'
+how_to_implement: Requires web access logs in the Web data model. The unique_urls condition
+  is deliberate — a broken link hit repeatedly produces high 404 count but low URL
+  diversity, while scanning produces both.
+known_false_positives: Sites with many broken links, aggressive search engine crawlers,
+  and monitoring probes checking for removed content. Public-facing sites should expect
+  a substantially higher threshold than internal applications.
+references:
+- https://attack.mitre.org/techniques/T1595/003/
+drilldown_searches:
+- name: View the detection results for $src$
+  search: '%original_detection_search% | search src = $src$'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+- name: View risk events for the last 7 days for $src$
+  search: '| from datamodel Risk.All_Risk | search normalized_risk_object IN ($src$)
+    starthoursago=168 | stats count values(search_name) as "Search Name" by normalized_risk_object'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+rba:
+  message: $src$ generated $not_found_count$ not-found responses across $unique_urls$
+    distinct URLs on $dest$.
+  risk_objects:
+  - field: src
+    type: system
+    score: 35
+  threat_objects: []
+tags:
+  analytic_story: [BOTSv1 Web Attacks]
+  asset_type: Web Server
+  mitre_attack_id: [T1595.003]
+  product: [Splunk Enterprise, Splunk Enterprise Security, Splunk Cloud]
+  security_domain: network
+  manual_test: Validated by hand against the BOTSv1 dataset.

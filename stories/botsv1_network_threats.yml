@@ -1,0 +1,19 @@
+name: BOTSv1 Network Threats
+id: 5e8b3c07-6f19-42a4-bd75-1c930e2f8a61
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+description: Detections built on network sensor telemetry, including Suricata IDS
+  alerts produced by the companion suricata-ids-rules project.
+narrative: Network sensor alerts are high-volume and low-context on their own. Converting
+  them to risk contributions rather than notables lets IDS signal accumulate against
+  an entity alongside endpoint and web evidence, which is the pattern that makes a
+  multi-stage intrusion visible as one story instead of thirty alerts.
+references:
+- https://github.com/jesse12-21/suricata-ids-rules
+- https://attack.mitre.org/
+tags:
+  category: [Adversary Tactics]
+  product: [Splunk Enterprise, Splunk Enterprise Security, Splunk Cloud]
+  usecase: Security Monitoring

@@ -1,0 +1,4 @@
+# contentctl requires this directory to exist even when empty.
+# Git does not track empty directories, so without this placeholder a clean
+# checkout omits it and `contentctl validate` fails with:
+#   Trying to find files in the directory '<dir>', but it does not exist.

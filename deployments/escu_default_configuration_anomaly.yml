@@ -1,0 +1,16 @@
+name: ESCU Default Configuration Anomaly
+id: c82b808e-0acb-40e4-bad9-960b2b5a539d
+date: '2026-07-29'
+author: jesse12-21
+version: 1
+status: production
+description: Default scheduling and alert action configuration for Anomaly detections.
+type: Anomaly
+scheduling:
+  cron_schedule: 0 * * * *
+  earliest_time: -70m@m
+  latest_time: -10m@m
+  schedule_window: auto
+alert_action:
+  rba:
+    enabled: true

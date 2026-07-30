@@ -1,0 +1,9 @@
+group_name,tier,description
+Domain Admins,0,Full domain control
+Enterprise Admins,0,Full forest control
+Schema Admins,0,Can modify AD schema
+Administrators,0,Local administrative rights
+Account Operators,1,Can manage user accounts
+Backup Operators,1,Can bypass file permissions
+Server Operators,1,Can administer domain servers
+Remote Desktop Users,2,Interactive remote access

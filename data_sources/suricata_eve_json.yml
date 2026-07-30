@@ -1,0 +1,15 @@
+name: Suricata EVE JSON
+id: 8f2c6e10-5a4b-49d3-91c8-2b7e3f0a85d6
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+description: Suricata IDS alerts in EVE JSON format, normalised to the Intrusion_Detection
+  data model. Produced by the companion suricata-ids-rules project — see docs/integrations.md
+  for the inputs.conf and props.conf required to ingest it.
+source: suricata
+sourcetype: suricata:eve
+supported_TA:
+- name: Splunk Add-on for Suricata
+  url: https://splunkbase.splunk.com/app/6113
+  version: 3.0.0
+fields: [_time, src, dest, signature, severity, category]

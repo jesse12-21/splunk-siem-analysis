@@ -1,0 +1,55 @@
+name: BOTSv1 Privileged Group Membership Change
+id: c7f13a68-4d92-4b57-8e01-6a2f9c4d5b30
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+type: TTP
+description: Detects the addition of an account to a security-enabled group via the
+  Change data model, covering Windows EventCodes 4728, 4732, and 4756. Membership
+  changes to privileged groups are a routine administrative action and a routine
+  persistence step; the distinction is context, which is why this contributes risk
+  rather than raising a notable on its own.
+data_source:
+- Windows Event Log Security 4732
+search: '| tstats `security_content_summariesonly` count, min(_time) as firstTime,
+  max(_time) as lastTime from datamodel=Change.All_Changes where All_Changes.object_category="group"
+  AND All_Changes.action="modified" by All_Changes.user, All_Changes.object, All_Changes.dest
+  | `drop_dm_object_name(All_Changes)` | `security_content_ctime(firstTime)` | `security_content_ctime(lastTime)`
+  | `botsv1_privileged_group_membership_change_filter`'
+how_to_implement: Requires Windows Security events normalised to the Change data model.
+  Restrict to genuinely privileged groups by editing the filter macro with your own
+  group names rather than the detection search.
+known_false_positives: Routine IT administration, onboarding and offboarding automation,
+  and identity-governance tooling all modify group membership legitimately. This detection
+  is expected to fire regularly; its value is the risk it contributes when it coincides
+  with other signals against the same entity.
+references:
+- https://attack.mitre.org/techniques/T1098/
+drilldown_searches:
+- name: View the detection results for $user$
+  search: '%original_detection_search% | search user = $user$'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+- name: View risk events for the last 7 days for $user$
+  search: '| from datamodel Risk.All_Risk | search normalized_risk_object IN ($user$)
+    starthoursago=168 | stats count min(_time) as firstTime max(_time) as lastTime
+    values(search_name) as "Search Name" values(risk_message) as "Risk Message" values(analyticstories)
+    as "Analytic Stories" by normalized_risk_object'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+rba:
+  message: $user$ modified membership of group $object$ on $dest$.
+  risk_objects:
+  - field: user
+    type: user
+    score: 40
+  threat_objects: []
+tags:
+  analytic_story: [BOTSv1 Credential Access]
+  asset_type: Endpoint
+  mitre_attack_id: [T1098]
+  product: [Splunk Enterprise, Splunk Enterprise Security, Splunk Cloud]
+  security_domain: access
+  manual_test: Validated by hand against the BOTSv1 dataset; see the note on the other
+    detections in this story regarding why automated attack_data testing is not provided.

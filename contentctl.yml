@@ -1,0 +1,20 @@
+path: .
+app:
+  uid: 9001
+  title: BOTSv1 SOC Detections
+  appid: botsv1_soc_detections
+  version: 1.0.0
+  description: Risk-based detection content developed against the Boss of the SOC v1 dataset.
+  prefix: botsv1
+  label: BOTSv1 SOC Detections
+  author_name: jesse12-21
+  author_email: noreply@example.com
+  author_company: jesse12-21
+verbose: false
+enforce_deprecation_mapping_requirement: false
+enrichments: false
+build_app: true
+build_api: false
+data_source_TA_validation: false
+test_data_caches: []
+build_path: dist

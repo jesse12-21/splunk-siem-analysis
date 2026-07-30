@@ -1,0 +1,3 @@
+definition: search *
+description: Tuning filter for this detection. Add environment-specific exclusions here rather than editing the detection search, so tuning never risks altering match logic.
+name: botsv1_successful_logon_after_failed_logon_burst_filter

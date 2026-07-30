@@ -1,0 +1,15 @@
+name: botsv1_privileged_groups
+id: 2c58e7b1-0d94-4a63-8f27-6e1b3a95d074
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+lookup_type: csv
+description: Security groups whose membership confers privilege, tiered by blast radius.
+  Tier 0 groups control the domain or forest; tier 1 can escalate to tier 0; tier 2
+  grants access but not administrative control. Used to scope the group membership
+  change detection to groups that matter rather than alerting on every group in the
+  directory. Replace with your own group names before deploying.
+file_path: botsv1_privileged_groups.csv
+min_matches: 1
+case_sensitive_match: false

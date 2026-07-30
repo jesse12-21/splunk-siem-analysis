@@ -1,0 +1,3 @@
+definition: index=web_logs
+description: Web server access log source. Override this macro to point the detections at your own index.
+name: botsv1_web

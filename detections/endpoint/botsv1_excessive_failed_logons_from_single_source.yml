@@ -1,0 +1,67 @@
+name: BOTSv1 Excessive Failed Logons From Single Source
+id: 3f2a91c4-6b18-4d7e-9a05-2c8e1f4b7d63
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+type: Anomaly
+description: Identifies a source address producing an unusually high volume of failed
+  authentication attempts within a single hour. Written against the Authentication
+  data model rather than raw Windows EventCode 4625, so the detection fires on any
+  CIM-normalised authentication source rather than only Windows Security logs.
+data_source:
+- Windows Event Log Security 4625
+search: '| tstats `security_content_summariesonly` count as failure_count, min(_time)
+  as firstTime, max(_time) as lastTime from datamodel=Authentication.Authentication
+  where Authentication.action="failure" by Authentication.src, Authentication.user,
+  _time span=1h | `drop_dm_object_name(Authentication)` | where failure_count > 20
+  | `security_content_ctime(firstTime)` | `security_content_ctime(lastTime)` | `botsv1_excessive_failed_logons_from_single_source_filter`'
+how_to_implement: Requires authentication events normalised to the Authentication
+  data model, with the data model accelerated. On the BOTSv1 dataset this means the
+  Splunk Add-on for Microsoft Windows must be installed so that EventCode 4625 maps
+  to Authentication.action="failure". Without acceleration the tstats search returns
+  no results — see docs/known-limitations.md.
+known_false_positives: Service accounts with expired credentials retry aggressively
+  and will exceed the threshold. Vulnerability scanners performing authenticated scans
+  produce the same pattern. Add both to the filter macro rather than raising the threshold,
+  which would also hide real attacks.
+references:
+- https://attack.mitre.org/techniques/T1110/001/
+drilldown_searches:
+- name: View the detection results for $src$
+  search: '%original_detection_search% | search src = $src$'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+- name: View risk events for the last 7 days for $src$
+  search: '| from datamodel Risk.All_Risk | search normalized_risk_object IN ($src$)
+    starthoursago=168 | stats count min(_time) as firstTime max(_time) as lastTime
+    values(search_name) as "Search Name" values(risk_message) as "Risk Message" values(analyticstories)
+    as "Analytic Stories" by normalized_risk_object'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+rba:
+  message: $src$ produced $failure_count$ failed authentication attempts against $user$
+    within one hour.
+  risk_objects:
+  - field: src
+    type: system
+    score: 30
+  - field: user
+    type: user
+    score: 20
+  threat_objects: []
+tags:
+  analytic_story:
+  - BOTSv1 Credential Access
+  asset_type: Endpoint
+  mitre_attack_id:
+  - T1110.001
+  product:
+  - Splunk Enterprise
+  - Splunk Enterprise Security
+  - Splunk Cloud
+  security_domain: access
+  manual_test: Validated by hand against the Boss of the SOC v1 dataset. Automated
+    testing is not provided because BOTSv1 is a 33.4-million-event corpus that cannot
+    be committed to a repository, and no equivalent replayable attack_data sample
+    exercises the Authentication data model path this detection depends on.

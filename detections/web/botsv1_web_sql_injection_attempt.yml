@@ -1,0 +1,56 @@
+name: BOTSv1 Web SQL Injection Attempt
+id: d8a05e2c-9f61-4738-b4d9-2e6c1a7f3095
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+type: TTP
+description: Detects SQL injection patterns in HTTP request URLs via the Web data
+  model. The previous version of this logic used a post-search `| where like(url,
+  "%UNION%")`, which retrieves every web event before filtering. Moving the match
+  into the tstats where clause pushes it down to the accelerated summaries and is
+  the difference between a search that runs in seconds and one that scans the index.
+data_source:
+- Web Server Access Logs
+search: '| tstats `security_content_summariesonly` count, values(Web.url) as urls,
+  min(_time) as firstTime, max(_time) as lastTime from datamodel=Web.Web where Web.url
+  IN ("*UNION*","*SELECT*","*information_schema*","*OR%201=1*","*'' OR ''1''=''1*")
+  by Web.src, Web.dest, Web.status | `drop_dm_object_name(Web)` | `security_content_ctime(firstTime)`
+  | `security_content_ctime(lastTime)` | `botsv1_web_sql_injection_attempt_filter`'
+how_to_implement: Requires web access logs normalised to the Web data model with acceleration
+  enabled. URL decoding matters — encoded payloads bypass these literal matches, which
+  is noted as a limitation rather than claimed as coverage.
+known_false_positives: Security scanners and WAF test suites produce these patterns
+  legitimately. Analytics and BI tools occasionally pass SQL fragments in query strings.
+  Documentation sites about SQL will match on article URLs.
+references:
+- https://attack.mitre.org/techniques/T1190/
+- https://owasp.org/www-community/attacks/SQL_Injection
+drilldown_searches:
+- name: View the detection results for $src$
+  search: '%original_detection_search% | search src = $src$'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+- name: View risk events for the last 7 days for $src$
+  search: '| from datamodel Risk.All_Risk | search normalized_risk_object IN ($src$)
+    starthoursago=168 | stats count values(search_name) as "Search Name" values(risk_message)
+    as "Risk Message" by normalized_risk_object'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+rba:
+  message: $src$ sent $count$ requests to $dest$ containing SQL injection patterns.
+  risk_objects:
+  - field: src
+    type: system
+    score: 60
+  threat_objects:
+  - field: urls
+    type: url
+tags:
+  analytic_story: [BOTSv1 Web Attacks]
+  asset_type: Web Server
+  mitre_attack_id: [T1190]
+  product: [Splunk Enterprise, Splunk Enterprise Security, Splunk Cloud]
+  security_domain: network
+  manual_test: Validated by hand against the BOTSv1 dataset; BOTSv1 cannot be committed
+    and no replayable attack_data sample exercises this Web data model path.

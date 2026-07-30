@@ -1,0 +1,58 @@
+name: BOTSv1 Successful Logon After Failed Logon Burst
+id: b4e29d17-8c53-4a06-9f2b-1d7e5a3c08f4
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+status: production
+type: TTP
+description: Identifies a source address that authenticated successfully within the
+  same one-hour window in which it produced a burst of failed attempts. The time bounding
+  matters — an earlier version of this logic correlated failures and successes across
+  the entire search window, which will pair a Tuesday failure with a Friday success
+  and report it as compromise.
+data_source:
+- Windows Event Log Security 4625
+- Windows Event Log Security 4624
+search: '| tstats `security_content_summariesonly` count(eval(Authentication.action="failure"))
+  as failures, count(eval(Authentication.action="success")) as successes, values(Authentication.user)
+  as user, min(_time) as firstTime, max(_time) as lastTime from datamodel=Authentication.Authentication
+  by Authentication.src, _time span=1h | `drop_dm_object_name(Authentication)` | where
+  failures > 20 AND successes > 0 | `security_content_ctime(firstTime)` | `security_content_ctime(lastTime)`
+  | `botsv1_successful_logon_after_failed_logon_burst_filter`'
+how_to_implement: Requires authentication events normalised to the Authentication data
+  model with acceleration enabled. Both failure and success events must be present
+  from the same source; if only failures are collected the detection cannot fire.
+known_false_positives: A user who mistypes a password repeatedly then succeeds produces
+  this pattern, though rarely at 20+ attempts. Service accounts rotating credentials
+  and password-spray simulations from authorised red teams are the more common causes.
+references:
+- https://attack.mitre.org/techniques/T1110/001/
+drilldown_searches:
+- name: View the detection results for $src$
+  search: '%original_detection_search% | search src = $src$'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+- name: View risk events for the last 7 days for $src$
+  search: '| from datamodel Risk.All_Risk | search normalized_risk_object IN ($src$)
+    starthoursago=168 | stats count min(_time) as firstTime max(_time) as lastTime
+    values(search_name) as "Search Name" values(risk_message) as "Risk Message" values(analyticstories)
+    as "Analytic Stories" by normalized_risk_object'
+  earliest_offset: $info_min_time$
+  latest_offset: $info_max_time$
+rba:
+  message: $src$ authenticated successfully as $user$ after $failures$ failed attempts
+    within the same hour.
+  risk_objects:
+  - field: src
+    type: system
+    score: 70
+  threat_objects: []
+tags:
+  analytic_story: [BOTSv1 Credential Access]
+  asset_type: Endpoint
+  mitre_attack_id: [T1110.001]
+  product: [Splunk Enterprise, Splunk Enterprise Security, Splunk Cloud]
+  security_domain: access
+  manual_test: Validated by hand against the BOTSv1 dataset. BOTSv1 is a 33.4-million-event
+    corpus that cannot be committed, and no replayable attack_data sample exercises
+    this Authentication data model correlation.

@@ -1,0 +1,139 @@
+<form version="1.1" theme="dark">
+  <label>SOC Overview — Risk-Based</label>
+  <description>Entity risk, detection activity, and attack surface. Built for the BOTSv1 dataset. Panels are ordered the way an analyst triages: highest-risk entities first, supporting detail below.</description>
+
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="tr">
+      <label>Time range</label>
+      <default><earliest>-24h@h</earliest><latest>now</latest></default>
+    </input>
+    <input type="dropdown" token="risk_floor">
+      <label>Minimum risk score</label>
+      <choice value="0">All</choice>
+      <choice value="50">50+</choice>
+      <choice value="100">100+</choice>
+      <default>50</default>
+    </input>
+  </fieldset>
+
+  <!-- Risk first. In an RBA model the question is not "what alerted" but
+       "which entity has accumulated the most evidence against it". -->
+  <row>
+    <panel>
+      <title>Highest-Risk Entities</title>
+      <table>
+        <search>
+          <query>
+            | from datamodel Risk.All_Risk
+            | stats sum(All_Risk.calculated_risk_score) as total_risk,
+                    dc(All_Risk.search_name) as distinct_detections,
+                    values(All_Risk.search_name) as detections,
+                    count as risk_events
+              by All_Risk.risk_object, All_Risk.risk_object_type
+            | rename All_Risk.* as *
+            | where total_risk &gt;= $risk_floor$
+            | sort - total_risk
+            | head 20
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="drilldown">cell</option>
+        <format type="color" field="total_risk">
+          <colorPalette type="list">[#53A051,#F8BE34,#DC4E41]</colorPalette>
+          <scale type="threshold">50,100</scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Risk Accumulation Over Time</title>
+      <chart>
+        <search>
+          <query>
+            | from datamodel Risk.All_Risk
+            | timechart span=1h sum(All_Risk.calculated_risk_score) as risk by All_Risk.risk_object_type
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Detections Contributing Risk</title>
+      <chart>
+        <search>
+          <query>
+            | from datamodel Risk.All_Risk
+            | stats sum(All_Risk.calculated_risk_score) as risk by All_Risk.search_name
+            | rename All_Risk.search_name as "Detection"
+            | sort - risk
+            | head 10
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.legend.placement">none</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Authentication Failures</title>
+      <chart>
+        <search>
+          <query>
+            | tstats `security_content_summariesonly` count from datamodel=Authentication.Authentication
+              where Authentication.action="failure" by _time span=1h
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Web Status Codes</title>
+      <chart>
+        <search>
+          <query>
+            | tstats `security_content_summariesonly` count from datamodel=Web.Web
+              by Web.status, _time span=1h
+            | rename Web.status as status
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Source Geolocation — Authentication Failures</title>
+      <map>
+        <search>
+          <query>
+            | tstats `security_content_summariesonly` count from datamodel=Authentication.Authentication
+              where Authentication.action="failure" by Authentication.src
+            | rename Authentication.src as src
+            | iplocation src
+            | geostats latfield=lat longfield=lon count
+          </query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+        </search>
+        <option name="mapping.type">marker</option>
+      </map>
+    </panel>
+  </row>
+</form>

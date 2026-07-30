@@ -1,0 +1,14 @@
+name: Windows Event Log Security 4624
+id: 2b7f5c91-3e84-4a16-9d0f-6c1b8e4a72d5
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+description: Windows Security event log, successful logon events (EventCode 4624),
+  normalised to the Authentication data model.
+source: WinEventLog:Security
+sourcetype: WinEventLog
+supported_TA:
+- name: Splunk Add-on for Microsoft Windows
+  url: https://splunkbase.splunk.com/app/742
+  version: 9.0.0
+fields: [_time, EventCode, src, user, action]

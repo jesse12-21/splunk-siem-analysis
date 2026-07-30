@@ -1,13 +1,21 @@
 # Splunk data (too large for git)
-*.csv
 *.gz
 *.tar
 *.tgz
 botsv1/
 
-# Splunk configuration with credentials
+# CSV data is excluded, BUT contentctl lookups are CSVs that the detections
+# depend on — an ignored lookup silently breaks `contentctl validate` on a
+# clean checkout. Negate them explicitly. See docs/known-limitations.md.
+*.csv
+!lookups/*.csv
+
+# Splunk configuration containing credentials
 local/
 passwd
+
+# contentctl build output — generated from detections/, not source
+dist/
 
 # OS files
 .DS_Store

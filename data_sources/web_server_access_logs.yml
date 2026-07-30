@@ -1,0 +1,14 @@
+name: Web Server Access Logs
+id: 6d3b8f42-1c97-4e05-b7a2-8e5f0d1c46b9
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+description: HTTP access logs. In BOTSv1 these arrive as stream:http and IIS/Apache
+  sourcetypes and are normalised to the Web data model.
+source: stream:http
+sourcetype: stream:http
+supported_TA:
+- name: Splunk Common Information Model
+  url: https://splunkbase.splunk.com/app/1621
+  version: 8.5.0
+fields: [_time, src, dest, url, http_method, status, http_user_agent]

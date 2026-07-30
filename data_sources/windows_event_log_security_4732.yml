@@ -1,0 +1,14 @@
+name: Windows Event Log Security 4732
+id: 4c9e1a63-7d25-4b38-8f10-3a6d0b5e29c7
+version: 1
+date: '2026-07-29'
+author: jesse12-21
+description: Windows Security event log, member added to a security-enabled local
+  group (EventCode 4732) and related 4728/4756, normalised to the Change data model.
+source: WinEventLog:Security
+sourcetype: WinEventLog
+supported_TA:
+- name: Splunk Add-on for Microsoft Windows
+  url: https://splunkbase.splunk.com/app/742
+  version: 9.0.0
+fields: [_time, EventCode, user, src_user, object]

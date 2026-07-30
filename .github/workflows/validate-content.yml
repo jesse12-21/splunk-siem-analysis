@@ -1,0 +1,119 @@
+name: Validate Content
+
+# Detection-as-code. Every detection is parsed and compiled by contentctl —
+# Splunk's own content tool — so a detection that would fail to build into an
+# ES app cannot reach main.
+on:
+  push:
+    branches: [main]
+    paths: ['detections/**', 'macros/**', 'stories/**', 'lookups/**', 'data_sources/**',
+            'deployments/**', 'dashboards/**', 'contentctl.yml', '.github/workflows/validate-content.yml']
+  pull_request:
+    paths: ['detections/**', 'macros/**', 'stories/**', 'lookups/**', 'data_sources/**',
+            'deployments/**', 'contentctl.yml']
+  workflow_dispatch:
+
+jobs:
+  contentctl:
+    name: contentctl validate and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install contentctl
+        run: |
+          python -m pip install --upgrade pip
+          pip install contentctl
+          contentctl --help > /dev/null && echo "contentctl installed"
+
+      - name: Verify required files are present in the checkout
+        run: |
+          # A .gitignore rule excluding *.csv once had the potential to drop
+          # lookups the detections depend on. Check explicitly so a missing
+          # file is named rather than surfacing as a reference-resolution error.
+          missing=0
+          for d in detections macros stories deployments data_sources; do
+            if [ ! -d "$d" ]; then
+              echo "::error::directory $d is missing from the checkout"; missing=1
+            else
+              echo "  present  $d/ ($(find "$d" -name '*.yml' | wc -l) yml)"
+            fi
+          done
+          [ -f contentctl.yml ] || { echo "::error::contentctl.yml missing"; missing=1; }
+          [ -d app_template ] || { echo "::error::app_template/ missing — contentctl build requires it"; missing=1; }
+          exit $missing
+
+      - name: Validate content
+        run: contentctl validate
+
+      - name: Build Splunk app
+        run: |
+          # Proves the content compiles to installable .conf files, not just
+          # that the YAML parses. This is where an invalid RBA block or an
+          # unresolvable macro reference surfaces.
+          contentctl build
+          echo "--- generated conf files ---"
+          find dist -name '*.conf' | sort
+
+      - name: Confirm RBA config was generated
+        run: |
+          # A detection whose rba block failed to serialise would build a
+          # savedsearch with no risk action, which is silent and wrong.
+          conf=$(find dist -name savedsearches.conf | head -1)
+          count=$(grep -c 'action.risk.param._risk = ' "$conf" || true)
+          detections=$(find detections -name '*.yml' | wc -l)
+          echo "  detections: $detections   risk stanzas: $count"
+          if [ "$count" -lt "$detections" ]; then
+            echo "::error::only $count of $detections detections produced an RBA stanza"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: splunk-app
+          path: dist/*.tar.gz
+          retention-days: 14
+
+  yaml-hygiene:
+    name: YAML hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+
+      - name: Unique detection IDs
+        run: |
+          python - <<'PY'
+          import glob, sys, yaml, collections
+          ids = collections.Counter()
+          for f in glob.glob('detections/**/*.yml', recursive=True):
+              ids[yaml.safe_load(open(f))['id']] += 1
+          dupes = [i for i, n in ids.items() if n > 1]
+          if dupes:
+              print(f"::error::duplicate detection ids: {dupes}"); sys.exit(1)
+          print(f"{len(ids)} detection ids, all unique.")
+          PY
+
+      - name: Every detection carries ATT&CK and RBA
+        run: |
+          python - <<'PY'
+          import glob, sys, yaml
+          fail = False
+          for f in sorted(glob.glob('detections/**/*.yml', recursive=True)):
+              d = yaml.safe_load(open(f))
+              tags = d.get('tags', {})
+              if not tags.get('mitre_attack_id'):
+                  print(f"::error::{f} has no mitre_attack_id"); fail = True
+              if not (d.get('rba') or {}).get('risk_objects'):
+                  print(f"::error::{f} has no rba risk_objects"); fail = True
+              else:
+                  print(f"  ok  {d['name']}  [{','.join(tags.get('mitre_attack_id', []))}]")
+          sys.exit(1 if fail else 0)
+          PY

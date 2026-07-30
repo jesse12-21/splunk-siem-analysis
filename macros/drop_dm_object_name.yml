@@ -1,0 +1,5 @@
+arguments:
+  - object_name
+definition: 'rename "$object_name$.*" as "*"'
+description: Strip the data model object prefix from field names
+name: drop_dm_object_name

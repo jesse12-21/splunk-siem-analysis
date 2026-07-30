@@ -1,0 +1,3 @@
+definition: index=windows_security
+description: Windows Security event log source. Override this macro to point the detections at your own index.
+name: botsv1_windows_security

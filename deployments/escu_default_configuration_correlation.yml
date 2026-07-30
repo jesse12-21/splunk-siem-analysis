@@ -1,0 +1,16 @@
+name: ESCU Default Configuration Correlation
+id: 2e89872d-4f31-44be-aee2-310c89599aa5
+date: '2026-07-29'
+author: jesse12-21
+version: 1
+status: production
+description: Default scheduling and alert action configuration for Correlation detections.
+type: Correlation
+scheduling:
+  cron_schedule: 0 * * * *
+  earliest_time: -70m@m
+  latest_time: -10m@m
+  schedule_window: auto
+alert_action:
+  rba:
+    enabled: true

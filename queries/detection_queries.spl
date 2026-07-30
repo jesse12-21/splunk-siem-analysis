@@ -1,185 +1,202 @@
-# Splunk SIEM Detection Queries
-# ================================
-# A collection of SPL queries for security monitoring and threat detection.
-# These queries are designed for use with the BOTS v1 dataset but can be
-# adapted for any environment with similar log sources.
+# Splunk SIEM Detection Queries — Reference Library
+# ==================================================
+# Ad-hoc and hunting queries for the BOTSv1 dataset.
+#
+# NOTE ON SCOPE. Production detections are NOT here. They live in
+# detections/ as contentctl YAML, carry MITRE ATT&CK mappings and risk
+# scoring, and are validated by CI. This file is the hunting and
+# exploration layer — queries an analyst runs by hand.
+#
+# Two conventions applied throughout, both absent from the earlier version
+# of this file and both material:
+#
+#   1. tstats against accelerated data models rather than raw `index=`
+#      searches. A raw search reads every event then filters; tstats reads
+#      pre-computed summaries. On 33.4M events the difference is minutes
+#      versus seconds.
+#
+#   2. CIM data models rather than hardcoded index and field names. The
+#      earlier version searched `index=windows_security EventCode=4625`,
+#      which only works on Windows logs in an index with that exact name.
+#      `datamodel=Authentication` works on any normalised auth source.
+#
+# Where a raw search is genuinely the right tool — free-text hunting, or a
+# source with no CIM mapping — that is noted inline rather than left to
+# look like an oversight.
 
 
 # ============================================================
-# AUTHENTICATION MONITORING
+# AUTHENTICATION
 # ============================================================
 
-# --- Brute-Force Detection (Threshold) ---
-# Identifies source IPs with more than 20 failed logins in a 1-hour window.
-index=windows_security EventCode=4625
-| bin _time span=1h
-| stats count AS failures by src_ip, _time
+# --- Failed authentication volume by source ---
+| tstats `security_content_summariesonly` count as failures
+  from datamodel=Authentication.Authentication
+  where Authentication.action="failure"
+  by Authentication.src, Authentication.user, _time span=1h
+| `drop_dm_object_name(Authentication)`
 | where failures > 20
-| sort -failures
+| sort - failures
 
-# --- Brute-Force Followed by Successful Login ---
-# High-confidence credential compromise: many failures then success from same IP.
-index=windows_security (EventCode=4625 OR EventCode=4624)
-| stats count(eval(EventCode=4625)) AS failures, count(eval(EventCode=4624)) AS successes by src_ip
+# --- Failed then successful, same hour ---
+# Time bounding by _time span=1h is the important part. Without it this
+# pairs a failure from Tuesday with a success from Friday.
+| tstats `security_content_summariesonly`
+    count(eval(Authentication.action="failure")) as failures,
+    count(eval(Authentication.action="success")) as successes
+  from datamodel=Authentication.Authentication
+  by Authentication.src, Authentication.user, _time span=1h
+| `drop_dm_object_name(Authentication)`
 | where failures > 20 AND successes > 0
-| eval risk="HIGH - Likely credential compromise"
-| table src_ip, failures, successes, risk
 
-# --- Failed Logins Over Time ---
-# Time-series view of authentication failures to identify attack windows.
-index=windows_security EventCode=4625
-| timechart span=1h count AS "Failed Logins"
+# --- Authentication timeline ---
+| tstats `security_content_summariesonly` count
+  from datamodel=Authentication.Authentication
+  by Authentication.action, _time span=1h
+| `drop_dm_object_name(Authentication)`
+| timechart span=1h sum(count) by action
 
-# --- Account Lockouts ---
-# Detect account lockout events (often triggered by brute-force).
-index=windows_security EventCode=4740
-| table _time, Account_Name, src_ip
-| sort -_time
-
-
-# ============================================================
-# PRIVILEGE ESCALATION
-# ============================================================
-
-# --- New Account Creation ---
-# Detects when a new user account is created.
-index=windows_security EventCode=4720
-| table _time, Account_Name, TargetUserName
-| sort -_time
-
-# --- Group Membership Changes ---
-# Monitors additions to privileged groups (Domain Admins, Administrators, etc.).
-index=windows_security (EventCode=4728 OR EventCode=4732 OR EventCode=4756)
-| table _time, EventCode, Account_Name, TargetUserName, Group_Name
-| sort -_time
-
-# --- Sudo Usage on Linux ---
-# Monitors sudo command execution for privilege escalation attempts.
-index=linux_auth process=sudo
-| table _time, user, src_ip, command
-| sort -_time
+# --- Account lockouts ---
+# Raw search: lockout (4740) is not represented in the Authentication model.
+`botsv1_windows_security` EventCode=4740
+| table _time, user, src
+| sort - _time
 
 
 # ============================================================
-# WEB APPLICATION ATTACKS
+# PRIVILEGE AND ACCOUNT CHANGES
 # ============================================================
 
-# --- SQL Injection Detection ---
-# Searches for common SQL injection patterns in web request URIs.
-index=web_logs
-| where like(uri_path, "%SELECT%") OR like(uri_path, "%UNION%") OR like(uri_path, "%DROP%") OR like(uri_path, "%1=1%") OR like(uri_path, "%OR%1%")
-| stats count by clientip, uri_path, status
-| sort -count
+# --- Group membership modifications ---
+| tstats `security_content_summariesonly` count, values(All_Changes.object) as groups
+  from datamodel=Change.All_Changes
+  where All_Changes.object_category="group" AND All_Changes.action="modified"
+  by All_Changes.user, All_Changes.dest
+| `drop_dm_object_name(All_Changes)`
 
-# --- Directory Traversal ---
-# Detects path traversal attempts in web requests.
-index=web_logs
-| where like(uri_path, "%../%") OR like(uri_path, "%/etc/passwd%") OR like(uri_path, "%/proc/%")
-| table _time, clientip, method, uri_path, status
-| sort -_time
-
-# --- Web Scanner Detection ---
-# Identifies automated scanners by high volume of 404 errors from a single IP.
-index=web_logs status=404
-| stats count by clientip
-| where count > 100
-| sort -count
-
-# --- HTTP Error Spike ---
-# Time-series of HTTP errors to identify attack windows.
-index=web_logs (status=404 OR status=500 OR status=403)
-| timechart span=1h count by status
+# --- Account creation ---
+| tstats `security_content_summariesonly` count
+  from datamodel=Change.All_Changes
+  where All_Changes.object_category="user" AND All_Changes.action="created"
+  by All_Changes.user, All_Changes.object, All_Changes.dest
+| `drop_dm_object_name(All_Changes)`
 
 
 # ============================================================
-# NETWORK / EXFILTRATION
+# WEB
 # ============================================================
 
-# --- Large Outbound Transfers ---
-# Detects unusually large data transfers to external IPs.
-index=firewall action=allowed dest_port!=80 dest_port!=443 dest_port!=53
-| stats count, sum(bytes_out) AS total_bytes by src_ip, dest_ip, dest_port
-| where total_bytes > 10000000
-| eval MB_transferred=round(total_bytes/1048576,2)
-| table src_ip, dest_ip, dest_port, count, MB_transferred
-| sort -MB_transferred
+# --- Injection patterns in URLs ---
+# Matching inside the tstats `where` pushes the filter into the summaries.
+# The earlier version used a post-search `| where like(url,"%UNION%")`,
+# which retrieves every web event first.
+| tstats `security_content_summariesonly` count, values(Web.url) as urls
+  from datamodel=Web.Web
+  where Web.url IN ("*UNION*","*SELECT*","*information_schema*","*OR%201=1*")
+  by Web.src, Web.dest, Web.status
+| `drop_dm_object_name(Web)`
 
-# --- Connections to Unusual Ports ---
-# Identifies outbound connections on non-standard ports (potential C2).
-index=firewall action=allowed dest_port!=80 dest_port!=443 dest_port!=53 dest_port!=22
-| stats count by dest_ip, dest_port
-| where count > 10
-| sort -count
+# --- Path traversal ---
+| tstats `security_content_summariesonly` count, values(Web.url) as urls
+  from datamodel=Web.Web
+  where Web.url IN ("*../*","*/etc/passwd*","*%2e%2e%2f*")
+  by Web.src, Web.dest
+| `drop_dm_object_name(Web)`
 
-# --- Firewall Deny Spike ---
-# Time-series of firewall blocks to identify scanning or attack activity.
-index=firewall action=blocked
-| timechart span=1h count
+# --- Content discovery by 404 volume and URL diversity ---
+# URL diversity separates a scanner from a broken link hit repeatedly.
+| tstats `security_content_summariesonly` count as not_found, dc(Web.url) as unique_urls
+  from datamodel=Web.Web where Web.status=404
+  by Web.src
+| `drop_dm_object_name(Web)`
+| where not_found > 100 AND unique_urls > 50
+| sort - not_found
+
+# --- Status code distribution ---
+| tstats `security_content_summariesonly` count from datamodel=Web.Web
+  by Web.status, _time span=1h
+| `drop_dm_object_name(Web)`
+| timechart span=1h sum(count) by status
 
 
 # ============================================================
-# IDS ALERT ANALYSIS
+# NETWORK
 # ============================================================
 
-# --- High-Severity IDS Alerts ---
-# Surfaces critical and high-severity Suricata alerts.
-index=ids_alerts alert.severity<=2
-| stats count by alert.signature, src_ip, dest_ip
-| sort -count
-| head 20
+# --- Large outbound transfers on non-standard ports ---
+| tstats `security_content_summariesonly` sum(All_Traffic.bytes_out) as bytes_out, count
+  from datamodel=Network_Traffic.All_Traffic
+  where All_Traffic.action="allowed" AND NOT All_Traffic.dest_port IN (80,443,53)
+  by All_Traffic.src, All_Traffic.dest, All_Traffic.dest_port
+| `drop_dm_object_name(All_Traffic)`
+| where bytes_out > 10000000
+| eval MB = round(bytes_out/1048576, 2)
+| sort - MB
 
-# --- IDS Alerts Over Time ---
-# Time-series of IDS alerts to spot attack campaigns.
-index=ids_alerts
-| timechart span=1h count by alert.severity
+# --- Suricata IDS alerts by severity ---
+# Sourced from the companion suricata-ids-rules project.
+# See docs/integrations.md for the ingest configuration.
+| tstats `security_content_summariesonly` count
+  from datamodel=Intrusion_Detection.IDS_Attacks
+  by IDS_Attacks.severity, IDS_Attacks.signature
+| `drop_dm_object_name(IDS_Attacks)`
+| sort - count
+
+# --- Firewall denies over time ---
+| tstats `security_content_summariesonly` count
+  from datamodel=Network_Traffic.All_Traffic
+  where All_Traffic.action="blocked" by _time span=1h
+| timechart span=1h sum(count) as denies
+
+
+# ============================================================
+# RISK-BASED INVESTIGATION
+# ============================================================
+# These operate on the Risk data model that the detections in detections/
+# write to. See docs/rba-guide.md for the methodology.
+
+# --- Entities by accumulated risk ---
+| from datamodel Risk.All_Risk
+| stats sum(All_Risk.calculated_risk_score) as total_risk,
+        dc(All_Risk.search_name) as distinct_detections,
+        values(All_Risk.search_name) as detections
+  by All_Risk.risk_object, All_Risk.risk_object_type
+| rename All_Risk.* as *
+| where distinct_detections >= 3
+| sort - total_risk
+
+# --- Full risk history for one entity ---
+# Replace <ENTITY> with a value from the query above.
+| from datamodel Risk.All_Risk
+| search All_Risk.risk_object="<ENTITY>"
+| table _time, All_Risk.search_name, All_Risk.calculated_risk_score, All_Risk.risk_message
+| rename All_Risk.* as *
+| sort _time
+
+# --- ATT&CK technique coverage of accumulated risk ---
+# Which techniques an entity has triggered, which is the difference
+# between "twelve alerts" and "a kill chain".
+| from datamodel Risk.All_Risk
+| stats values(All_Risk.annotations.mitre_attack.mitre_technique_id) as techniques,
+        dc(All_Risk.annotations.mitre_attack.mitre_technique_id) as technique_count
+  by All_Risk.risk_object
+| rename All_Risk.* as *
+| where technique_count > 1
+| sort - technique_count
 
 
 # ============================================================
 # CROSS-SOURCE CORRELATION
 # ============================================================
 
-# --- Full Activity for a Specific IP ---
-# Correlate all events from a single source IP across every log source.
-# Replace <ATTACKER_IP> with the actual IP address.
-(index=web_logs clientip="<ATTACKER_IP>") OR
-(index=windows_security src_ip="<ATTACKER_IP>") OR
-(index=firewall src_ip="<ATTACKER_IP>") OR
-(index=ids_alerts src_ip="<ATTACKER_IP>")
-| eval source_type=case(
-    index="web_logs", "Web",
-    index="windows_security", "Windows",
-    index="firewall", "Firewall",
-    index="ids_alerts", "IDS"
-)
-| table _time, source_type, index, sourcetype, _raw
+# --- All activity for one address across every source ---
+# Raw search is correct here: the point is to see everything, including
+# sources with no CIM mapping. Replace <IP>.
+(`botsv1_web` OR `botsv1_windows_security` OR `botsv1_ids`) "<IP>"
+| eval log_source = case(
+    index=="web_logs", "Web",
+    index=="windows_security", "Windows",
+    index=="ids_alerts", "Suricata IDS",
+    1==1, index)
+| table _time, log_source, sourcetype, _raw
 | sort _time
-
-# --- Attack Summary by Source IP ---
-# Summarizes activity volume per log source for a given attacker.
-(index=web_logs clientip="<ATTACKER_IP>") OR
-(index=windows_security src_ip="<ATTACKER_IP>") OR
-(index=firewall src_ip="<ATTACKER_IP>") OR
-(index=ids_alerts src_ip="<ATTACKER_IP>")
-| stats count by index
-| rename index AS "Log Source", count AS "Event Count"
-
-
-# ============================================================
-# DASHBOARD QUERIES
-# ============================================================
-
-# --- Top 10 Attacking IPs ---
-index=windows_security EventCode=4625
-| stats count by src_ip
-| sort -count
-| head 10
-
-# --- Geolocation of Attack Sources ---
-index=windows_security EventCode=4625
-| iplocation src_ip
-| geostats count by Country
-
-# --- Event Count by Index ---
-| eventcount summarize=false index=*
-| table index, count
-| sort -count

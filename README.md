@@ -2,12 +2,14 @@
 
 # 📊 SIEM Threat Detection & Log Analysis with Splunk
 
-### Detecting Security Incidents Through Log Correlation, SPL Queries, and Real-Time Dashboards
+### Risk-Based Detection Engineering on 33.4 Million Real Security Events
 
 [![Splunk](https://img.shields.io/badge/Splunk_Enterprise_10.2-000000?style=for-the-badge&logo=splunk&logoColor=white)](https://www.splunk.com/)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu_24.04-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](https://ubuntu.com/)
 [![SPL](https://img.shields.io/badge/SPL-Search_Processing_Language-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://docs.splunk.com/Documentation/Splunk/latest/SearchReference)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![MITRE ATT&CK](https://img.shields.io/badge/MITRE_ATT%26CK-Mapped-red?style=for-the-badge)](https://attack.mitre.org/)
+[![Risk-Based Alerting](https://img.shields.io/badge/Risk--Based_Alerting-Enabled-8A2BE2?style=for-the-badge)](docs/rba-guide.md)
+[![Validate Content](https://img.shields.io/github/actions/workflow/status/jesse12-21/splunk-siem-analysis/validate-content.yml?branch=main&style=for-the-badge&label=Content%20CI)](../../actions/workflows/validate-content.yml)
 
 <br>
 
@@ -35,6 +37,10 @@ A SIEM (Security Information and Event Management) platform is the nerve center 
 | **Dashboards** | Building operational security monitoring dashboards | Splunk Classic Dashboards |
 | **Alert Rules** | Creating automated detection with alert actions | Scheduled searches, triggers |
 | **Investigation** | Correlating events to reconstruct an attack timeline | Cross-sourcetype correlation, `timechart` |
+| **Risk-Based Alerting** | Scoring entities rather than firing per-detection alerts | Risk data model, `action.risk`, ES 8.x |
+| **Detection-as-Code** | Versioned YAML detections compiled and validated in CI | `contentctl`, GitHub Actions |
+| **CIM & Acceleration** | Portable detections on normalised data models | `tstats`, Authentication/Web/Change/Intrusion_Detection |
+| **Pipeline Integration** | Ingesting sensor output from companion projects | Suricata EVE JSON, Sigma conversion |
 
 ---
 
@@ -78,6 +84,71 @@ The lab runs Splunk Enterprise on Ubuntu 24.04 inside VirtualBox, analyzing over
 | **stream:http** | 39,010 | HTTP request/response stream data |
 
 > **Data source:** This project uses the [Boss of the SOC (BOTS) v1](https://github.com/splunk/botsv1) dataset — a realistic, labeled attack dataset created by Splunk for security training. It contains a complete web attack scenario targeting a corporate environment, with data captured from August 2016.
+
+### 🎯 Detection Coverage — MITRE ATT&CK Mapping
+
+Every detection carries its ATT&CK technique in structured YAML, so coverage is measurable programmatically rather than read off a table. CI fails any detection missing a technique ID or a risk object.
+
+| Adversary Technique | ATT&CK ID | Tactic | Detection | Risk |
+|---|---|---|---|---|
+| **Brute Force: Password Guessing** | [T1110.001](https://attack.mitre.org/techniques/T1110/001/) | Credential Access | Excessive Failed Logons From Single Source | 30 / 20 |
+| **Brute Force: Password Guessing** | [T1110.001](https://attack.mitre.org/techniques/T1110/001/) | Credential Access | Successful Logon After Failed Logon Burst | 70 |
+| **Account Manipulation** | [T1098](https://attack.mitre.org/techniques/T1098/) | Persistence | Privileged Group Membership Change | 40 |
+| **Exploit Public-Facing Application** | [T1190](https://attack.mitre.org/techniques/T1190/) | Initial Access | Web SQL Injection Attempt | 60 |
+| **Active Scanning: Wordlist Scanning** | [T1595.003](https://attack.mitre.org/techniques/T1595/003/) | Reconnaissance | Web Scanning Via Not Found Responses | 35 |
+| **Active Scanning** | [T1595](https://attack.mitre.org/techniques/T1595/) | Reconnaissance | High Severity Suricata IDS Alert | 45 |
+
+### 📂 Repository Structure
+
+<div align="center">
+<img src="assets/repo-structure.png" alt="Repository structure diagram. Left panel lists the file tree: README, LICENSE, contentctl.yml, .github/workflows, assets, detections split into endpoint, web and network, stories, macros, data_sources, deployments, dashboards, queries, and docs — with files added in the July 2026 refresh highlighted in green and the revised SPL library in amber. Right panel describes each directory's purpose and ATT&CK coverage." width="900">
+</div>
+
+<br>
+
+<details>
+<summary><strong>Text version (click to expand)</strong></summary>
+
+```
+.
+├── README.md                                  ← You are here
+├── LICENSE
+├── contentctl.yml                             ← Detection-as-code project config
+├── .github/workflows/
+│   └── validate-content.yml                   ← CI: contentctl validate + build
+├── assets/                                    ← Screenshots referenced in this README
+├── detections/                                ← Detection-as-code source of truth
+│   ├── endpoint/                              ← 3 detections — T1110.001, T1098
+│   ├── web/                                   ← 2 detections — T1190, T1595.003
+│   └── network/                               ← 1 detection — T1595 (Suricata bridge)
+├── stories/                                   ← 3 analytic stories grouping detections
+├── macros/                                    ← 9 macros: index abstraction + tuning filters
+├── data_sources/                              ← 5 log source definitions and required add-ons
+├── deployments/                               ← Schedule + RBA alert action per detection type
+├── dashboards/
+│   └── soc_overview.xml                       ← Risk-based SOC dashboard (Simple XML)
+├── queries/
+│   ├── detection_queries.spl                  ← Hunting library — tstats + CIM data models
+│   └── alert_configs.spl                      ← Migration map to the generated savedsearches
+└── docs/
+    ├── rba-guide.md                           ← Risk-Based Alerting methodology and scoring
+    ├── integrations.md                        ← Sigma→SPL and Suricata EVE ingest
+    └── known-limitations.md                   ← contentctl findings and coverage gaps
+```
+
+</details>
+
+### Building the content
+
+The detections are the source of truth; the Splunk app is generated from them.
+
+```bash
+pip install contentctl
+contentctl validate     # schema, references, RBA structure
+contentctl build        # -> dist/botsv1_soc_detections-latest.tar.gz
+```
+
+Install the resulting app on a search head running Splunk Enterprise Security. Both commands run in CI on every push.
 
 ---
 
@@ -400,6 +471,151 @@ Correlating events across `stream:http`, `stream:ip`, `stream:tcp`, and `suricat
 
 ---
 
+## Part 7 - Risk-Based Alerting
+
+Parts 1–6 build detections that each raise their own alert. That model does not survive contact with a real environment, and this section replaces it.
+
+### Why alert-per-detection fails
+
+Consider one source address that, within an hour:
+
+1. requests 200 URLs and receives 404 on all of them
+2. sends a handful of requests containing `UNION SELECT`
+3. produces 25 failed logons against a domain controller
+4. authenticates successfully
+
+Under alert-per-detection that is four notables, likely assigned to different analysts, each closed as low severity. Scanning is background noise on any internet-facing host. Twenty-five failed logons is a forgotten service account. A successful logon is normal.
+
+Together they are an intrusion, and no individual alert says so.
+
+**Risk-Based Alerting** inverts the model: each detection writes a *scored risk event* against an entity, and alerting happens when accumulated risk crosses a threshold. The four signals become one entity at risk 195 across four detections and three ATT&CK techniques — a single investigation with the story already assembled. Practitioners report alert-volume reductions between 50% and 90% after the change.
+
+### How it is implemented here
+
+Every detection in [`detections/`](detections/) carries an `rba` block:
+
+```yaml
+rba:
+  message: $src$ authenticated successfully as $user$ after $failures$ failed
+    attempts within the same hour.
+  risk_objects:
+  - field: src
+    type: system
+    score: 70
+  threat_objects: []
+```
+
+`contentctl build` compiles that into the saved-search configuration Splunk ES consumes:
+
+```
+action.risk = 1
+action.risk.param._risk = [{"risk_object_field": "src", "risk_object_type": "system", "risk_score": 70}]
+```
+
+**Risk objects** are the entity under suspicion. **Threat objects** are supporting indicators — a URL, a signature, a hash — that travel with the event but are not scored. Reversing these is the most common RBA mistake; scoring a URL fills your highest-risk list with URLs instead of hosts.
+
+### Scoring
+
+| Detection | ATT&CK | Risk object | Score |
+|---|---|---|---|
+| Excessive Failed Logons From Single Source | T1110.001 | src / user | 30 / 20 |
+| Successful Logon After Failed Logon Burst | T1110.001 | src | 70 |
+| Privileged Group Membership Change | T1098 | user | 40 |
+| Web SQL Injection Attempt | T1190 | src | 60 |
+| Web Scanning Via Not Found Responses | T1595.003 | src | 35 |
+| High Severity Suricata IDS Alert | T1595 | src | 45 |
+
+A risk score is not a severity rating. It answers one question: **how much does this observation move my belief that the entity is compromised?** Group membership change is a genuine persistence technique (T1098) and scores 40, because IT administration does it daily — the score reflects evidential weight in the environment, not the technique's severity in the abstract.
+
+Nothing scores above 70, deliberately. A detection scoring 90+ recreates alert-per-detection, because one firing crosses any sensible threshold alone. If something genuinely warrants immediate response regardless of context, it should be a notable — the honest move is to say so rather than inflate a score.
+
+Full methodology, threshold selection, and failure modes: [`docs/rba-guide.md`](docs/rba-guide.md).
+
+---
+
+## Part 8 - Detection-as-Code
+
+Detections are code. They are versioned, reviewed, and compiled — or they rot.
+
+### contentctl
+
+[`contentctl`](https://github.com/splunk/contentctl) is the Splunk Threat Research Team's content tool, and the same one used to build the ESCU app that ships with Enterprise Security. It converts detections from YAML into Splunk `.conf` files, validates macro and object references, and packages everything into an installable app.
+
+```bash
+pip install contentctl
+contentctl validate     # schema, references, RBA structure
+contentctl build        # -> dist/botsv1_soc_detections-latest.tar.gz
+```
+
+The repository is laid out to contentctl's conventions: `detections/`, `macros/`, `stories/`, `data_sources/`, `deployments/`, `lookups/`.
+
+### What CI checks
+
+[`.github/workflows/validate-content.yml`](.github/workflows/validate-content.yml) runs on every push touching content:
+
+| Check | Purpose |
+|---|---|
+| **`contentctl validate`** | Schema conformance and reference resolution — Splunk's own validator |
+| **`contentctl build`** | Proves content compiles to installable `.conf`, not merely that YAML parses |
+| **RBA stanza count** | Asserts every detection produced a risk action. A detection whose `rba` block failed to serialise would deploy silently without risk scoring. |
+| Required files present | Named directly rather than surfacing later as reference errors |
+| Detection ID uniqueness | A duplicate silently shadows a detection |
+| ATT&CK + RBA coverage | No detection merges without a technique ID and a risk object |
+| App artifact upload | The built app is downloadable from the run |
+
+The build step is the one that matters. Schema validation says a detection is well-formed; building it into `.conf` files says it will actually deploy.
+
+### Macros keep detections portable
+
+Index names live in macros, not in searches:
+
+```yaml
+name: botsv1_windows_security
+definition: index=windows_security
+```
+
+Each detection also gets a `_filter` macro, empty by default, that ends its search. Tuning happens there rather than in the detection logic — a rule file and a tuning file change for different reasons and on different schedules.
+
+### Honest limits
+
+`contentctl` can tell you a detection is well-formed. It cannot tell you it is correct. A detection searching a data model field your add-on does not populate will validate, build, deploy, and never fire.
+
+Related: these detections carry `tags.manual_test` rather than automated test data. contentctl's testing framework replays `attack_data` samples against a containerised Splunk, which does not fit content built on BOTSv1 — a 33.4-million-event corpus that cannot be committed. **This is a real gap**, and a weaker guarantee than the companion Suricata project achieves. It is documented in [`docs/known-limitations.md`](docs/known-limitations.md) rather than papered over.
+
+---
+
+## Part 9 - Pipeline Integration
+
+This project is the SIEM layer of a three-repository pipeline. Rules are authored where the protocol expertise lives, then converted or ingested here for correlation and risk scoring.
+
+```
+wireshark-threat-detection          suricata-ids-rules
+  Sigma rules                         Suricata rules → EVE JSON
+        │                                     │
+        │ contentctl / sigma convert          │ inputs.conf / props.conf
+        ▼                                     ▼
+              splunk-siem-analysis
+         contentctl YAML → risk events → RBA
+```
+
+### Suricata EVE JSON — implemented
+
+[`botsv1_high_severity_suricata_ids_alert.yml`](detections/network/botsv1_high_severity_suricata_ids_alert.yml) consumes alerts from the [suricata-ids-rules](https://github.com/jesse12-21/suricata-ids-rules) project via the `Intrusion_Detection` data model.
+
+Treating IDS alerts as risk rather than notables is the point. A tuned sensor still produces more alerts than a SOC can triage individually — as a risk source, that volume becomes useful instead of harmful.
+
+Two operational warnings, both in [`docs/integrations.md`](docs/integrations.md): EVE JSON logs every event type by default, not only alerts, which is an expensive way to learn how Splunk licensing works. And Suricata's numeric severity is inverted relative to the CIM vocabulary — severity 1 is the *most* severe.
+
+### Sigma rules — documented, not implemented
+
+The [wireshark-threat-detection](https://github.com/jesse12-21/wireshark-threat-detection) project maintains seven Sigma rules, and contentctl has native Sigma support. Conversion is one command.
+
+What conversion does *not* produce is a contentctl detection. It emits a search string; the RBA block, data source definition, ATT&CK tags, and story reference are still manual. "Sigma converts to Splunk" is often presented as a one-step process and it is not.
+
+The mechanism is proven with one detection rather than claimed across seven. That is the honest state of it.
+
+---
+
 ## 🔑 Key SPL Queries Reference
 
 A quick reference of all detection queries used throughout this project:
@@ -422,7 +638,9 @@ A quick reference of all detection queries used throughout this project:
 | Component | Version | Purpose |
 |---|---|---|
 | **Ubuntu** | 24.04 LTS | Host operating system (VirtualBox VM) |
-| **Splunk Enterprise** | 10.2.2 | SIEM platform |
+| **Splunk Enterprise** | 10.2.2 (lab) | SIEM platform. Screenshots were captured on 10.2.2; ES 8.5.1 lists platform compatibility through 10.5. |
+| **Splunk Enterprise Security** | 8.x | Risk-Based Alerting, risk index, findings |
+| **contentctl** | 5.5.16 | Detection-as-code: validate, build, package |
 | **BOTS v1 Dataset** | 1.0 | Realistic attack scenario data (33.4M events) |
 | **VirtualBox** | Latest | VM hypervisor |
 
@@ -430,7 +648,7 @@ A quick reference of all detection queries used throughout this project:
 
 ## 📚 Summary
 
-This project demonstrates practical SIEM operations skills through six progressive exercises:
+This project demonstrates practical SIEM operations skills through nine progressive exercises:
 
 1. **Setup & Ingestion** — Installed Splunk Enterprise 10.2.2 on Ubuntu 24.04, loaded the BOTS v1 dataset (33.4 million events across 26 source types), and verified successful ingestion
 2. **SPL Fundamentals** — Explored data structure using SPL queries, identifying key Windows EventCodes (4688, 4703, 4624) and understanding the dataset's composition
@@ -438,10 +656,13 @@ This project demonstrates practical SIEM operations skills through six progressi
 4. **Security Dashboards** — Built a four-panel SOC Overview dashboard plus geolocation analysis, visualizing the attacker's activity against normal baseline traffic
 5. **Alert Rules** — Configured three automated alerts (web attacks, suspicious process execution, new account creation) with severity-based triage and hourly scheduling
 6. **Attack Investigation** — Correlated 35,732 events from the attacker across HTTP stream, TCP/IP stream, and Suricata IDS logs, reconstructing a 45-minute attack timeline with 10,000+ IDS alerts demonstrating defense-in-depth detection
+7. **Risk-Based Alerting** — Replaced alert-per-detection with entity risk scoring. Six detections write scored risk events against users and systems rather than raising individual notables, so a multi-stage intrusion surfaces as one high-risk entity carrying the full story instead of four disconnected alerts closed as low severity
+8. **Detection-as-Code** — Rebuilt the detections as `contentctl` YAML — Splunk's own content tool, the one that builds the ESCU app — with MITRE ATT&CK mapping, risk scoring, and tuning filters. CI validates the schema and **builds an installable Splunk app on every push**, so a detection that would fail to deploy cannot reach main
+9. **Pipeline Integration** — Ingested Suricata EVE JSON from the companion IDS project as a risk source, and documented the Sigma-to-SPL conversion path from the Wireshark project, forming a three-repository detection pipeline from packet capture through sensor rules to SIEM correlation
 
 ### Skills Demonstrated
 
-`SIEM Operations` · `Splunk Administration` · `SPL Queries` · `Threat Detection` · `Log Analysis` · `Security Dashboards` · `Alert Engineering` · `Incident Investigation` · `Log Correlation` · `Attack Timeline Reconstruction`
+`SIEM Operations` · `Detection Engineering` · `Detection-as-Code` · `Risk-Based Alerting` · `MITRE ATT&CK` · `Splunk Administration` · `SPL & tstats` · `CIM Data Models` · `Splunk Enterprise Security` · `contentctl` · `Threat Detection` · `Security Dashboards` · `Alert Engineering` · `Incident Investigation` · `Log Correlation` · `Attack Timeline Reconstruction` · `CI/CD`
 
 ---
 

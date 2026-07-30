@@ -9,6 +9,7 @@ botsv1/
 # clean checkout. Negate them explicitly. See docs/known-limitations.md.
 *.csv
 !lookups/*.csv
+!**/lookups/*.csv
 
 # Splunk configuration containing credentials
 local/
